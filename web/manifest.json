@@ -1,0 +1,19 @@
+{
+    "name": "Milo",
+    "short_name": "Milo",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#edf7ff",
+    "theme_color": "#007abc",
+    "description": "A conversational AI companion for chat and voice.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/milo.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ]
+}

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script type="module" src="/assets/packages/model_viewer_plus/assets/model-viewer.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      touch-action: none;
+    }
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      background-color: transparent;
+      --poster-color: transparent;
+      pointer-events: none;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <model-viewer
+    id="milo"
+    src="/assets/assets/grab3d-cozy-character.glb"
+    alt="Milo companion model"
+    autoplay
+    animation-name="idle"
+    animation-crossfade-duration="320"
+    camera-orbit="0deg 78deg 2.4m"
+    camera-target="0m 0.55m 0m"
+    field-of-view="28deg"
+    shadow-intensity="1"
+    shadow-softness="0.8"
+    exposure="1"
+    environment-image="neutral"
+    interaction-prompt="none"
+    disable-zoom
+    disable-pan
+    disable-tap
+    touch-action="none"
+    loading="eager">
+  </model-viewer>
+  <script>
+    const mv = document.getElementById('milo');
+    const looping = ['idle', 'listen', 'talk', 'dance'];
+    const face = { mouth:0, mouthT:0, smile:0, smileT:0, blink:0, blinkT:0,
+      speaking:false, lastWordAt:0, nextExprAt:0, nextBlinkAt:0 };
+    let meshes = [];
+
+    function collect(root) {
+      if (!root) return;
+      const stack = [root];
+      while (stack.length) {
+        const obj = stack.pop();
+        if (obj && obj.morphTargetInfluences && obj.morphTargetInfluences.length) {
+          meshes.push(obj);
+        }
+        const kids = (obj && obj.children) || [];
+        for (let i = 0; i < kids.length; i++) stack.push(kids[i]);
+      }
+    }
+    function findScene(el) {
+      const seen = [];
+      const visit = function(obj, depth) {
+        if (!obj || depth > 5) return null;
+        for (let i = 0; i < seen.length; i++) if (seen[i] === obj) return null;
+        seen.push(obj);
+        if (obj.isScene) return obj;
+        if (obj.scene && obj.scene.isScene) return obj.scene;
+        try {
+          const syms = Object.getOwnPropertySymbols(obj);
+          for (let i = 0; i < syms.length; i++) {
+            const found = visit(obj[syms[i]], depth + 1);
+            if (found) return found;
+          }
+        } catch (e) {}
+        return null;
+      };
+      return visit(el, 0);
+    }
+    function viseme(word) {
+      const w = String(word || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (!w) return 0.08;
+      if (/^[mbp]/.test(w)) return 0.05;
+      if (/^[fv]/.test(w)) return 0.16;
+      if (/o/.test(w)) return 0.62;
+      if (/[au]/.test(w)) return 0.52;
+      if (/[ei]/.test(w)) return 0.34;
+      if (/[aeiou]/.test(w)) return 0.4;
+      return 0.14;
+    }
+    function applyFace() {
+      for (let i = 0; i < meshes.length; i++) {
+        const inf = meshes[i].morphTargetInfluences;
+        if (!inf) continue;
+        const d = meshes[i].morphTargetDictionary || {};
+        if ('open' in d) inf[d.open] = face.mouth;
+        if ('smile' in d) inf[d.smile] = face.smile;
+        if ('blink' in d) inf[d.blink] = face.blink;
+        if (!('open' in d) && !('blink' in d)) {
+          if (inf.length >= 2) { inf[0] = face.mouth; inf[1] = face.smile; }
+          else inf[0] = Math.max(face.mouth, face.blink);
+        }
+      }
+    }
+    function bind() {
+      meshes = [];
+      const scene = findScene(mv);
+      if (scene) collect(scene);
+    }
+    function playClip(name) {
+      const clips = mv.availableAnimations || [];
+      const clip = clips.indexOf(name) >= 0 ? name : 'idle';
+      try { mv.animationCrossfadeDuration = 320; } catch (e) {}
+      if (mv.animationName === clip) {
+        try { mv.currentTime = 0; } catch (e) {}
+      }
+      mv.animationName = clip;
+      try {
+        if (looping.indexOf(clip) >= 0) mv.play();
+        else mv.play({repetitions: 1});
+      } catch (e) {
+        if (mv.play) mv.play();
+      }
+    }
+    function setSpeaking(on) {
+      face.speaking = !!on;
+      const now = performance.now();
+      if (!on) {
+        face.mouthT = 0; face.smileT = 0; face.blinkT = 0;
+        return;
+      }
+      if (!meshes.length) bind();
+      face.smileT = 0.16;
+      face.nextExprAt = now + 800;
+      face.nextBlinkAt = now + 600;
+    }
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (typeof data !== 'string') return;
+      if (data.startsWith('anim:')) playClip(data.slice(5));
+      if (data === 'speak:on') setSpeaking(true);
+      if (data === 'speak:off') setSpeaking(false);
+      if (data.startsWith('word:')) {
+        const word = data.slice(5);
+        face.mouthT = viseme(word);
+        face.lastWordAt = performance.now();
+        if (/hi|hey|yay|happy|love|hehe|wow|thanks/.test(word.toLowerCase())) {
+          face.smileT = Math.min(0.72, Math.max(face.smileT, 0.4));
+        }
+      }
+    });
+    mv.addEventListener('load', () => {
+      bind();
+      parent.postMessage('milo-ready', '*');
+    });
+    (function loop(now) {
+      requestAnimationFrame(loop);
+      if (face.speaking) {
+        if (now - face.lastWordAt > 260) face.mouthT = 0.09;
+        if (now > face.nextExprAt) {
+          const pick = Math.random();
+          if (pick < 0.34) face.smileT = 0.22;
+          else if (pick < 0.62) face.smileT = 0.5;
+          else if (pick < 0.82) face.smileT = 0.08;
+          else face.smileT = 0.64;
+          face.nextExprAt = now + 1100 + Math.random() * 1500;
+        }
+        if (now > face.nextBlinkAt) {
+          face.blinkT = 1;
+          face.nextBlinkAt = now + 1800 + Math.random() * 2200;
+          setTimeout(function() { face.blinkT = 0; }, 140);
+        }
+      }
+      const ease = face.speaking ? 0.07 : 0.05;
+      face.mouth += (face.mouthT - face.mouth) * ease;
+      face.smile += (face.smileT - face.smile) * 0.045;
+      face.blink += (face.blinkT - face.blink) * 0.28;
+      applyFace();
+    })(0);
+  </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+name: milo_companion
+description: A conversational AI companion for chat and voice.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.2
+  flutter_svg: ^2.0.10+1
+  shared_preferences: ^2.3.2
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  flutter_tts: ^4.2.5
+  speech_to_text: ^7.5.0
+  model_viewer_plus: ^1.10.0
+  webview_flutter: ^4.11.0
+  web: ^1.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/grab3d-cozy-character.glb
