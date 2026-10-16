@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_models.dart';
 import 'api_chat_service.dart';
@@ -11,13 +12,17 @@ import 'service_contracts.dart';
 class AppState extends ChangeNotifier {
   static const _conversationStorageKey = 'milo_conversations';
 
-  AppState({ChatService? chatService})
-      : chatService = chatService ?? ApiChatService() {
+  AppState({
+    ChatService? chatService,
+    this.onSignOut,
+  }) : chatService = chatService ?? ApiChatService() {
     _initTts();
   }
 
   final ChatService chatService;
+  final Future<void> Function()? onSignOut;
   final FlutterTts flutterTts = FlutterTts();
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   final List<Conversation> conversations = [];
   List<ChatMessage> messages = [];
@@ -29,33 +34,20 @@ class AppState extends ChangeNotifier {
   bool ttsEnabled = true;
   bool isServerConnected = false;
   String serverModel = 'gpt-5.4-nano';
-  String backendUrl = 'http://127.0.0.1:8000';
+  String backendUrl = ApiChatService.defaultBaseUrl;
   CompanionMood mood = CompanionMood.happy;
   String? chatError;
   String? _failedPrompt;
   Future<void>? _readyFuture;
+  bool _disposed = false;
 
   ApiChatService? get _apiService =>
       chatService is ApiChatService ? (chatService as ApiChatService) : null;
 
   Future<void> _initTts() async {
     try {
-      await flutterTts.setPitch(1.35);
-      await flutterTts.setSpeechRate(0.475);
-      flutterTts.setStartHandler(() {
-        isSpeaking = true;
-        setMood(CompanionMood.talking);
-      });
-      flutterTts.setCompletionHandler(() {
-        isSpeaking = false;
-        spokenWord = '';
-        setMood(CompanionMood.happy);
-      });
-      flutterTts.setErrorHandler((_) {
-        isSpeaking = false;
-        spokenWord = '';
-        setMood(CompanionMood.happy);
-      });
+      await flutterTts.setPitch(1.12);
+      await flutterTts.setSpeechRate(0.44);
       flutterTts.setProgressHandler((text, start, end, word) {
         spokenWord = word;
         isSpeaking = true;
@@ -68,58 +60,93 @@ class AppState extends ChangeNotifier {
 
   Future<void> speak(String text) async {
     if (!ttsEnabled) return;
-    try {
-      final clean = text
-          .replaceAll(RegExp(r'[*#_`~>\[\]]'), '')
-          .replaceAll(RegExp(r'\(.*?\)'), '')
-          .trim();
-      if (clean.isNotEmpty) {
-        await flutterTts.stop();
-        isSpeaking = true;
-        setMood(CompanionMood.talking);
-        await flutterTts.speak(clean);
-      }
-    } catch (e) {
-      debugPrint('TTS speak notice: $e');
-    }
+    await _speakWithFallback(_cleanSpeechText(text));
   }
 
   Future<void> speakWithCallback(String text,
       {required VoidCallback onComplete}) async {
-    try {
-      final clean = text
-          .replaceAll(RegExp(r'[*#_`~>\[\]]'), '')
-          .replaceAll(RegExp(r'\(.*?\)'), '')
-          .trim();
-      if (clean.isNotEmpty) {
-        flutterTts.setCompletionHandler(() {
-          isSpeaking = false;
-          spokenWord = '';
-          setMood(CompanionMood.happy);
-          onComplete();
-        });
-        flutterTts.setErrorHandler((_) {
-          isSpeaking = false;
-          spokenWord = '';
-          setMood(CompanionMood.happy);
-          onComplete();
-        });
-        await flutterTts.stop();
-        isSpeaking = true;
-        setMood(CompanionMood.talking);
-        await flutterTts.speak(clean);
-        return;
-      }
-    } catch (e) {
-      debugPrint('TTS callback notice: $e');
+    if (!ttsEnabled) {
+      onComplete();
+      return;
     }
-    onComplete();
+    await _speakWithFallback(
+      _cleanSpeechText(text),
+      onComplete: onComplete,
+    );
+  }
+
+  String _cleanSpeechText(String text) => text
+      .replaceAll(RegExp(r'[*#_`~>\[\]]'), '')
+      .replaceAll(RegExp(r'\(.*?\)'), '')
+      .trim();
+
+  Future<void> _speakWithFallback(
+    String text, {
+    VoidCallback? onComplete,
+  }) async {
+    if (text.isEmpty) {
+      onComplete?.call();
+      return;
+    }
+
+    try {
+      final api = _apiService;
+      if (api == null) {
+        throw const ChatServiceException(
+          'The configured chat service does not support speech generation.',
+        );
+      }
+      final audio = await api.synthesizeSpeech(text);
+      await _audioPlayer.stop();
+      await _audioPlayer.setAudioSource(
+        AudioSource.uri(Uri.dataFromBytes(audio, mimeType: 'audio/mpeg')),
+      );
+      isSpeaking = true;
+      setMood(CompanionMood.talking);
+      await _audioPlayer.play();
+    } catch (error) {
+      debugPrint('Backend speech generation failed; using device TTS: $error');
+      try {
+        await _speakOnDevice(text);
+      } catch (fallbackError) {
+        debugPrint('Device speech fallback failed: $fallbackError');
+      }
+    } finally {
+      isSpeaking = false;
+      spokenWord = '';
+      if (!_disposed) setMood(CompanionMood.happy);
+      onComplete?.call();
+    }
+  }
+
+  Future<void> _speakOnDevice(String text) async {
+    final completed = Completer<void>();
+    flutterTts.setStartHandler(() {
+      isSpeaking = true;
+      setMood(CompanionMood.talking);
+    });
+    flutterTts.setCompletionHandler(() {
+      if (!completed.isCompleted) completed.complete();
+    });
+    flutterTts.setErrorHandler((message) {
+      if (!completed.isCompleted) {
+        completed.completeError(
+          StateError('Device speech failed: $message'),
+        );
+      }
+    });
+    await flutterTts.stop();
+    await flutterTts.speak(text);
+    await completed.future;
   }
 
   Future<void> stopSpeaking() async {
     try {
+      await _audioPlayer.stop();
       await flutterTts.stop();
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('Could not stop speech playback: $error');
+    }
     isSpeaking = false;
     spokenWord = '';
     setMood(CompanionMood.happy);
@@ -262,10 +289,16 @@ class AppState extends ChangeNotifier {
       ttsEnabled = prefs.getBool('tts_enabled') ?? true;
       final savedUrl = prefs.getString('backend_url');
       if (savedUrl != null && savedUrl.isNotEmpty) {
-        backendUrl = savedUrl;
+        backendUrl = _isLegacyLocalBackendUrl(savedUrl)
+            ? ApiChatService.defaultBaseUrl
+            : savedUrl;
         _apiService?.setBaseUrl(backendUrl);
+        if (backendUrl != savedUrl) {
+          await prefs.setString('backend_url', backendUrl);
+        }
       } else {
-        backendUrl = _apiService?.currentBaseUrl ?? 'http://127.0.0.1:8000';
+        backendUrl =
+            _apiService?.currentBaseUrl ?? ApiChatService.defaultBaseUrl;
       }
       await checkServerHealth();
     } catch (error, stackTrace) {
@@ -274,6 +307,13 @@ class AppState extends ChangeNotifier {
       isReady = true;
       notifyListeners();
     }
+  }
+
+  bool _isLegacyLocalBackendUrl(String url) {
+    final uri = Uri.tryParse(url);
+    return uri != null &&
+        uri.port == 8000 &&
+        const {'localhost', '127.0.0.1', '10.0.2.2'}.contains(uri.host);
   }
 
   void _restoreConversations(String? serialized) {
@@ -367,5 +407,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('tts_enabled', value);
+  }
+
+  Future<void> signOut() async {
+    await onSignOut?.call();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    unawaited(_audioPlayer.dispose());
+    unawaited(flutterTts.stop());
+    super.dispose();
   }
 }

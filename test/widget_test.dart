@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:milo_companion/main.dart';
+import 'package:milo_companion/screens/auth_screen.dart';
 import 'package:milo_companion/screens/chat_screen.dart';
 import 'package:milo_companion/screens/home_screen.dart';
 import 'package:milo_companion/services/api_chat_service.dart';
@@ -22,12 +23,24 @@ class _RetryingChatService implements ChatService {
 }
 
 void main() {
+  testWidgets('offers sign-in and account creation', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: AuthScreen()));
+
+    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
+    await tester.tap(find.text('New to Milo? Create an account'));
+    await tester.pump();
+
+    expect(find.text('Create your Milo account'), findsOneWidget);
+    expect(find.text('Create account'), findsOneWidget);
+  });
+
   testWidgets('opens the home screen directly with no demo conversations',
       (tester) async {
     final state = AppState(chatService: _RetryingChatService());
     await tester.pumpWidget(ChangeNotifierProvider.value(
       value: state,
-      child: const MiloApp(),
+      child: const MiloApp(home: HomeScreen()),
     ));
 
     expect(find.byType(HomeScreen), findsOneWidget);
@@ -43,7 +56,7 @@ void main() {
     final state = AppState(chatService: service);
     await tester.pumpWidget(ChangeNotifierProvider.value(
       value: state,
-      child: const MiloApp(),
+      child: const MiloApp(home: HomeScreen()),
     ));
 
     await tester.enterText(

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "899993565056",
+    "project_id": "milo-2107d",
+    "storage_bucket": "milo-2107d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:899993565056:android:5efed0132cfca6041af365",
+        "android_client_info": {
+          "package_name": "com.example.milo_companion"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgLRw8om89BxkZ9jxBRvZsGIGDk0wU3ME"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

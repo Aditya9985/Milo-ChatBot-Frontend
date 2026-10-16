@@ -50,10 +50,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? 'Connected to Milo (${state.serverModel})'
                   : 'Could not connect to ${_urlController.text}. Please verify the address and port.'),
         ),
-        backgroundColor:
-            saveError == null && state.isServerConnected
-                ? const Color(0xff10b981)
-                : Colors.red,
+        backgroundColor: saveError == null && state.isServerConnected
+            ? const Color(0xff10b981)
+            : Colors.red,
       ),
     );
   }
@@ -199,11 +198,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onChanged: state.setTtsEnabled,
                       title: const Text('Spoken replies'),
                       subtitle: const Text(
-                          'Read Milo’s responses aloud on this device'),
+                        'Uses Milo’s natural AI-generated voice; OpenAI API '
+                        'usage charges may apply.',
+                      ),
                     ),
                   ],
                 ),
               ),
+              if (state.onSignOut != null) ...[
+                const SizedBox(height: 24),
+                const Text(
+                  'Account',
+                  style: TextStyle(
+                    color: AppTheme.blue,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(color: Color(0xffe2e8f0)),
+                  ),
+                  child: ListTile(
+                    leading:
+                        const Icon(Icons.logout_rounded, color: AppTheme.blue),
+                    title: const Text(
+                      'Sign out',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    onTap: () async {
+                      try {
+                        await state.signOut();
+                      } catch (error, stackTrace) {
+                        debugPrint(
+                            'Could not sign out of Firebase: $error\n$stackTrace');
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not sign out. Please retry.'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               const Text(
                 'Permissions',

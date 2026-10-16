@@ -1,29 +1,48 @@
-# Milo-ChatBot-Frontend
+# Milo ChatBot Frontend
 
-Milo is a Flutter companion app for AI chat, text-to-speech, and live voice
-conversations. It opens directly to the home screen and does not ship with
-sample conversations or simulated AI responses.
+Milo is a Flutter companion app for authenticated AI chat and speech. Firebase
+Authentication handles email/password accounts; the FastAPI backend validates
+Firebase ID tokens before serving chat and speech requests.
+
+## Firebase setup
+
+1. In the [Firebase Console](https://console.firebase.google.com/), open
+   project `milo-2107d`.
+2. In **Authentication > Sign-in method**, enable **Email/Password**.
+3. FlutterFire has registered the Android app using this project's Android
+   application ID and generated `lib/firebase_options.dart`. Re-run
+   `flutterfire configure --project=milo-2107d --platforms=android` after
+   adding another platform or changing the Firebase app configuration.
+4. Set `FIREBASE_PROJECT_ID=milo-2107d` in the backend deployment environment.
+   See [the backend setup](../backend/README.md).
+
+The Firebase client values identify the app and are not service-account
+credentials. Never add a service-account private key to the Flutter app.
 
 ## Run locally
 
-1. Install Flutter and fetch dependencies:
+Fetch packages:
 
-   ```sh
-   flutter pub get
-   ```
+```sh
+flutter pub get
+```
 
-2. Start a compatible FastAPI service that provides `/health` and `/chat`
-   endpoints.
-3. Run the app:
+Run on Android using the generated Firebase options:
 
-   ```sh
-   flutter run
-   ```
+```sh
+flutter run
+```
 
-The app checks the backend health endpoint and shows its connection status in
-the chat/settings screens. Android emulators use `10.0.2.2:8000`; iOS
-simulators, desktop and web use `127.0.0.1:8000` by default. Set a reachable
-backend address from **Settings** when using a physical device.
+Build a release APK with `flutter build apk`, or a Play Store bundle with
+`flutter build appbundle`. If you add iOS or web, run FlutterFire configure
+with the additional platform(s) before building.
+
+The app uses `https://milo-chatbot-backend.onrender.com` by default; change it
+from **Settings** if needed. Chat and speech API requests use the signed-in
+user's Firebase ID token. Spoken replies use OpenAI's `gpt-4o-mini-tts` and
+consume OpenAI API usage; on-device speech is the fallback if backend speech
+generation fails. Firebase Authentication has a no-cost tier, while AI
+provider usage may incur separate charges.
 
 ## Validate changes
 
@@ -33,5 +52,5 @@ flutter test
 ```
 
 Before publishing, replace the Android `applicationId` placeholder with an
-identifier under a domain you control, and configure the backend URL and
-transport security for the target environment.
+identifier you control and configure the backend URL for the target
+environment.

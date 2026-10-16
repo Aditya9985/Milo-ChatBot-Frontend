@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'service_contracts.dart';
 
+typedef SessionTokenProvider = Future<String?> Function();
+
 class ChatServiceException implements Exception {
   const ChatServiceException(this.message);
 
@@ -13,9 +15,13 @@ class ChatServiceException implements Exception {
 }
 
 class ApiChatService implements ChatService {
-  ApiChatService({String? baseUrl}) : _customBaseUrl = baseUrl;
+  static const defaultBaseUrl = 'https://milo-chatbot-backend.onrender.com';
+
+  ApiChatService({String? baseUrl, this.sessionTokenProvider})
+      : _customBaseUrl = baseUrl;
 
   String? _customBaseUrl;
+  final SessionTokenProvider? sessionTokenProvider;
 
   void setBaseUrl(String url) {
     _customBaseUrl = url.trim();
@@ -26,12 +32,7 @@ class ApiChatService implements ChatService {
     if (custom != null && custom.isNotEmpty) {
       return custom;
     }
-    // Android emulator loops back to host machine via 10.0.2.2
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:8000';
-    }
-    // iOS simulator or macOS desktop or web
-    return 'http://127.0.0.1:8000';
+    return defaultBaseUrl;
   }
 
   Future<Map<String, dynamic>?> checkHealth() async {
@@ -47,6 +48,17 @@ class ApiChatService implements ChatService {
     return null;
   }
 
+  Future<Map<String, String>> _authorizedHeaders() async {
+    final token = await sessionTokenProvider?.call();
+    if (token == null || token.isEmpty) {
+      throw const ChatServiceException('Sign in to use Milo.');
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
   @override
   Future<String> replyTo(String prompt) async {
     try {
@@ -54,7 +66,7 @@ class ApiChatService implements ChatService {
       final response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: await _authorizedHeaders(),
             body: jsonEncode({'message': prompt}),
           )
           .timeout(const Duration(seconds: 20));
@@ -75,6 +87,36 @@ class ApiChatService implements ChatService {
       debugPrint('ApiChatService request failed: $error');
       throw const ChatServiceException(
         'Could not reach the AI service. Check your connection and try again.',
+      );
+    }
+  }
+
+  Future<Uint8List> synthesizeSpeech(String text) async {
+    try {
+      final uri = Uri.parse('$currentBaseUrl/tts');
+      final response = await http
+          .post(
+            uri,
+            headers: await _authorizedHeaders(),
+            body: jsonEncode({'text': text, 'voice': 'ash'}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200 &&
+          response.headers['content-type']?.startsWith('audio/') == true &&
+          response.bodyBytes.isNotEmpty) {
+        return response.bodyBytes;
+      }
+      throw ChatServiceException(
+        'Milo’s voice service returned an unexpected response '
+        '(HTTP ${response.statusCode}).',
+      );
+    } on ChatServiceException {
+      rethrow;
+    } catch (error) {
+      debugPrint('ApiChatService speech request failed: $error');
+      throw const ChatServiceException(
+        'Could not generate Milo’s voice. Check your connection and try again.',
       );
     }
   }
