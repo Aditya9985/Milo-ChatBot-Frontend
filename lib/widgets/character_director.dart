@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart';
 class CharacterDirector extends ChangeNotifier {
   CharacterDirector();
 
-  static const looping = {'idle', 'listen', 'talk', 'dance'};
+  static const looping = {'idle', 'listen', 'talk', 'dance', 'think'};
   static const oneshot = {'jump', 'wave', 'spin', 'run', 'walk'};
   static const userMoves = ['jump', 'dance', 'wave', 'spin'];
 
@@ -20,6 +20,7 @@ class CharacterDirector extends ChangeNotifier {
   bool busy = false;
   bool speaking = false;
   String spokenWord = '';
+  String speechText = '';
   int wordTick = 0;
   bool liveLocked = false;
   String lastUserMove = '';
@@ -71,7 +72,7 @@ class CharacterDirector extends ChangeNotifier {
     }
   }
 
-  String lineFor(String name) {
+  String lineFor(String name, {String companion = 'Milo'}) {
     switch (name) {
       case 'jump':
         return const [
@@ -86,9 +87,9 @@ class CharacterDirector extends ChangeNotifier {
           'I have the moves!'
         ][_rng.nextInt(3)];
       case 'wave':
-        return const [
+        return [
           'Hi there!',
-          'Milo here!',
+          '$companion here!',
           'Hello, hello!'
         ][_rng.nextInt(3)];
       case 'spin':
@@ -121,7 +122,7 @@ class CharacterDirector extends ChangeNotifier {
     notifyListeners();
 
     _hold?.cancel();
-    if (name == 'idle' || name == 'listen' || name == 'talk') {
+    if (looping.contains(name)) {
       busy = false;
       return;
     }
@@ -150,11 +151,51 @@ class CharacterDirector extends ChangeNotifier {
   void setSpeaking(bool value) {
     if (speaking == value) return;
     speaking = value;
-    if (!value) spokenWord = '';
+    if (!value) {
+      spokenWord = '';
+      speechText = '';
+    }
+    play(
+      value ? 'talk' : (liveLocked ? 'listen' : 'idle'),
+      userInitiated: false,
+    );
+  }
+
+  void setSpeechText(String text) {
+    if (speechText == text) return;
+    speechText = text;
+    spokenWord = '';
     notifyListeners();
   }
 
+  void setSpeechProgress(double progress) {
+    if (!speaking || speechText.isEmpty) return;
+    final words = speechText
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (words.isEmpty) return;
+
+    final weights = words
+        .map((word) => word
+            .replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '')
+            .length
+            .clamp(1, 12))
+        .toList();
+    final totalWeight = weights.fold<int>(0, (sum, weight) => sum + weight);
+    var elapsedWeight = (progress.clamp(0.0, 1.0) * totalWeight).floor();
+    for (var index = 0; index < words.length; index++) {
+      if (elapsedWeight < weights[index] || index == words.length - 1) {
+        setSpokenWord(words[index]
+            .replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), ''));
+        return;
+      }
+      elapsedWeight -= weights[index];
+    }
+  }
+
   void setSpokenWord(String word) {
+    if (spokenWord == word) return;
     spokenWord = word;
     wordTick += 1;
     notifyListeners();

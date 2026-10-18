@@ -23,6 +23,7 @@ dependencies:
   just_audio: ^0.10.6
   firebase_core: ^5.0.0
   firebase_auth: ^7.0.0
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -33,3 +34,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/grab3d-cozy-character.glb
+    - assets/grab3d-cozy-character-girl.glb

@@ -87,7 +87,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.auto_awesome_rounded,
+            Icon(Icons.auto_awesome_rounded,
                 color: AppTheme.blue, size: 28),
             const SizedBox(width: 10),
             Expanded(
@@ -95,9 +95,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Milo',
-                    style: TextStyle(
+                  Text(
+                    state.companionName,
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.ink,
@@ -109,18 +109,14 @@ class _ChatScreenState extends State<ChatScreen> {
                         width: 7,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: state.isServerConnected
-                              ? const Color(0xff10b981)
-                              : const Color(0xfff59e0b),
+                          color: AppTheme.brightBlue,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 5),
-                      Text(
-                        state.isServerConnected
-                            ? 'Online • ${state.serverModel}'
-                            : 'Backend offline',
-                        style: const TextStyle(
+                      const Text(
+                        'AI companion',
+                        style: TextStyle(
                           fontSize: 11,
                           color: AppTheme.muted,
                           fontWeight: FontWeight.w500,
@@ -132,7 +128,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: AppTheme.blue),
+              icon: Icon(Icons.refresh_rounded, color: AppTheme.blue),
               tooltip: 'New Conversation',
               onPressed: () {
                 state.newConversation();
@@ -145,23 +141,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _messageList(AppState state) {
     if (state.messages.isEmpty && !state.isBusy) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(28),
+          padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.auto_awesome_rounded,
                   size: 44, color: AppTheme.brightBlue),
-              SizedBox(height: 14),
-              Text('Start a conversation with Milo',
+              const SizedBox(height: 14),
+              Text('Start a conversation with ${state.companionName}',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.ink)),
-              SizedBox(height: 6),
-              Text('Ask a question or share what is on your mind.',
+              const SizedBox(height: 6),
+              const Text('Ask a question or share what is on your mind.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppTheme.muted, height: 1.5)),
             ],
@@ -174,7 +170,7 @@ class _ChatScreenState extends State<ChatScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       itemCount: state.messages.length + (state.isBusy ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == state.messages.length) return _thinkingBubble();
+        if (index == state.messages.length) return _thinkingBubble(state);
         final msg = state.messages[index];
         final isUser = msg.author == MessageAuthor.user;
         return _chatBubble(state, msg.text, isUser);
@@ -220,11 +216,11 @@ class _ChatScreenState extends State<ChatScreen> {
               Container(
                 width: 32,
                 height: 32,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: AppTheme.paleBlue,
                 ),
-                child: const Center(
+                child: Center(
                   child: Icon(Icons.auto_awesome_rounded,
                       size: 18, color: AppTheme.blue),
                 ),
@@ -269,7 +265,7 @@ class _ChatScreenState extends State<ChatScreen> {
               IconButton(
                 icon: const Icon(Icons.volume_up_rounded, size: 20),
                 color: AppTheme.blue,
-                tooltip: 'Listen to Milo',
+                tooltip: 'Listen to ${state.companionName}',
                 onPressed: () => state.speak(text),
               ),
             if (isUser) const SizedBox(width: 6),
@@ -277,7 +273,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
-  Widget _thinkingBubble() => Padding(
+  Widget _thinkingBubble(AppState state) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -285,11 +281,11 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: 32,
               height: 32,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppTheme.paleBlue,
               ),
-              child: const Center(
+              child: Center(
                 child: Icon(Icons.auto_awesome_rounded,
                     size: 18, color: AppTheme.blue),
               ),
@@ -302,7 +298,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: const Color(0xffe2e8f0), width: 1),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   SizedBox(
@@ -313,10 +309,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       valueColor: AlwaysStoppedAnimation<Color>(AppTheme.blue),
                     ),
                   ),
-                  SizedBox(width: 10),
+                  const SizedBox(width: 10),
                   Text(
-                    'Milo is thinking...',
-                    style: TextStyle(
+                    '${state.companionName} is thinking...',
+                    style: const TextStyle(
                       fontSize: 13,
                       fontStyle: FontStyle.italic,
                       color: AppTheme.muted,
@@ -356,12 +352,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   enabled: !state.isBusy,
                   onSubmitted: (_) => _send(state),
                   style: const TextStyle(fontSize: 15, color: AppTheme.ink),
-                  decoration: const InputDecoration(
-                    hintText: 'Ask Milo anything...',
-                    hintStyle: TextStyle(color: AppTheme.muted, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Ask ${state.companionName} anything...',
+                    hintStyle:
+                        const TextStyle(color: AppTheme.muted, fontSize: 14),
                     border: InputBorder.none,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),

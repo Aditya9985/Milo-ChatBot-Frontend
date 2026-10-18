@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -10,31 +11,40 @@ import 'api_chat_service.dart';
 import 'service_contracts.dart';
 
 class AppState extends ChangeNotifier {
-  static const _conversationStorageKey = 'milo_conversations';
+  static const _legacyConversationStorageKey = 'milo_conversations';
+  static const _conversationStorageKeyPrefix = 'milo_conversations_';
+  static const _companionPreferenceKeyPrefix = 'milo_companion_character_';
+  static const availableCompanions = {'milo', 'suzu'};
 
   AppState({
     ChatService? chatService,
     this.onSignOut,
+    this.accountUser,
+    this.userId,
   }) : chatService = chatService ?? ApiChatService() {
     _initTts();
+    _audioPositionSubscription =
+        _audioPlayer.positionStream.listen(_updateSpeechProgress);
   }
 
   final ChatService chatService;
   final Future<void> Function()? onSignOut;
+  final User? accountUser;
+  final String? userId;
   final FlutterTts flutterTts = FlutterTts();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  late final StreamSubscription<Duration> _audioPositionSubscription;
 
   final List<Conversation> conversations = [];
   List<ChatMessage> messages = [];
   bool isBusy = false;
-  bool isOffline = false;
   bool isReady = false;
   bool isSpeaking = false;
   String spokenWord = '';
+  String speechText = '';
+  double speechProgress = 0;
+  String? companionId;
   bool ttsEnabled = true;
-  bool isServerConnected = false;
-  String serverModel = 'gpt-5.4-nano';
-  String backendUrl = ApiChatService.defaultBaseUrl;
   CompanionMood mood = CompanionMood.happy;
   String? chatError;
   String? _failedPrompt;
@@ -44,18 +54,52 @@ class AppState extends ChangeNotifier {
   ApiChatService? get _apiService =>
       chatService is ApiChatService ? (chatService as ApiChatService) : null;
 
+  String get _conversationStorageKey => conversationStorageKeyForUser(
+        userId ?? accountUser?.uid ?? 'guest',
+      );
+
+  String get _companionPreferenceKey =>
+      '$_companionPreferenceKeyPrefix${userId ?? accountUser?.uid ?? 'guest'}';
+
+  String get companionName => companionId == 'suzu' ? 'Suzu' : 'Milo';
+
+  String get companionModelAsset => companionId == 'suzu'
+      ? 'assets/grab3d-cozy-character-girl.glb'
+      : 'assets/grab3d-cozy-character.glb';
+
+  @visibleForTesting
+  static String conversationStorageKeyForUser(String userId) =>
+      '$_conversationStorageKeyPrefix$userId';
+
+  void _notifyListenersIfAlive() {
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> _initTts() async {
     try {
       await flutterTts.setPitch(1.12);
       await flutterTts.setSpeechRate(0.44);
+      if (_disposed) return;
       flutterTts.setProgressHandler((text, start, end, word) {
+        if (_disposed) return;
         spokenWord = word;
         isSpeaking = true;
-        notifyListeners();
+        _notifyListenersIfAlive();
       });
     } catch (e) {
       debugPrint('TTS initialization notice: $e');
     }
+  }
+
+  void _updateSpeechProgress(Duration position) {
+    if (_disposed || !isSpeaking) return;
+    final duration = _audioPlayer.duration;
+    if (duration == null || duration.inMilliseconds <= 0) return;
+    final progress =
+        (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
+    if ((progress - speechProgress).abs() < 0.01) return;
+    speechProgress = progress;
+    _notifyListenersIfAlive();
   }
 
   Future<void> speak(String text) async {
@@ -88,7 +132,11 @@ class AppState extends ChangeNotifier {
       onComplete?.call();
       return;
     }
+    if (_disposed) return;
 
+    speechText = text;
+    speechProgress = 0;
+    spokenWord = '';
     try {
       final api = _apiService;
       if (api == null) {
@@ -96,13 +144,17 @@ class AppState extends ChangeNotifier {
           'The configured chat service does not support speech generation.',
         );
       }
-      final audio = await api.synthesizeSpeech(text);
+      final audio =
+          await api.synthesizeSpeech(text, companion: companionId ?? 'milo');
+      if (_disposed) return;
       await _audioPlayer.stop();
       await _audioPlayer.setAudioSource(
         AudioSource.uri(Uri.dataFromBytes(audio, mimeType: 'audio/mpeg')),
       );
+      if (_disposed) return;
       isSpeaking = true;
       setMood(CompanionMood.talking);
+      _notifyListenersIfAlive();
       await _audioPlayer.play();
     } catch (error) {
       debugPrint('Backend speech generation failed; using device TTS: $error');
@@ -114,14 +166,18 @@ class AppState extends ChangeNotifier {
     } finally {
       isSpeaking = false;
       spokenWord = '';
+      speechProgress = 1;
       if (!_disposed) setMood(CompanionMood.happy);
-      onComplete?.call();
+      if (!_disposed) onComplete?.call();
     }
   }
 
   Future<void> _speakOnDevice(String text) async {
     final completed = Completer<void>();
+    await flutterTts.setPitch(companionId == 'suzu' ? 1.18 : 1.12);
+    if (_disposed) return;
     flutterTts.setStartHandler(() {
+      if (_disposed) return;
       isSpeaking = true;
       setMood(CompanionMood.talking);
     });
@@ -141,48 +197,23 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> stopSpeaking() async {
+    if (_disposed) return;
     try {
       await _audioPlayer.stop();
       await flutterTts.stop();
     } catch (error) {
       debugPrint('Could not stop speech playback: $error');
     }
+    if (_disposed) return;
     isSpeaking = false;
     spokenWord = '';
+    speechProgress = 0;
     setMood(CompanionMood.happy);
-  }
-
-  Future<void> checkServerHealth() async {
-    final api = _apiService;
-    if (api != null) {
-      final info = await api.checkHealth();
-      if (info != null && info['status'] == 'ok') {
-        isServerConnected = true;
-        serverModel = info['model']?.toString() ?? 'gpt-5.4-nano';
-        isOffline = false;
-      } else {
-        isServerConnected = false;
-        isOffline = true;
-      }
-      notifyListeners();
-    }
-  }
-
-  Future<void> setBackendUrl(String url) async {
-    backendUrl = url.trim();
-    final api = _apiService;
-    if (api != null) {
-      api.setBaseUrl(backendUrl);
-    }
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('backend_url', backendUrl);
-    await checkServerHealth();
   }
 
   Future<void> sendMessage(String text, {bool readAloud = false}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || isBusy) return;
+    if (_disposed || trimmed.isEmpty || isBusy) return;
 
     messages = [
       ...messages,
@@ -190,19 +221,24 @@ class AppState extends ChangeNotifier {
     ];
     isBusy = true;
     mood = CompanionMood.thinking;
-    notifyListeners();
+    _notifyListenersIfAlive();
 
     chatError = null;
     _failedPrompt = null;
     String reply;
     try {
-      reply = await chatService.replyTo(trimmed);
+      reply = await chatService.replyTo(
+        trimmed,
+        companion: companionId ?? 'milo',
+      );
+      if (_disposed) return;
     } on ChatServiceException catch (error) {
+      if (_disposed) return;
       chatError = error.message;
       _failedPrompt = trimmed;
       isBusy = false;
       mood = CompanionMood.happy;
-      notifyListeners();
+      _notifyListenersIfAlive();
       return;
     }
     messages = [
@@ -213,17 +249,18 @@ class AppState extends ChangeNotifier {
     _recordActiveConversation(trimmed);
 
     isBusy = false;
-    notifyListeners();
+    _notifyListenersIfAlive();
 
     if (readAloud && ttsEnabled) {
       await speak(reply);
     } else {
+      if (_disposed) return;
       mood = CompanionMood.talking;
-      notifyListeners();
+      _notifyListenersIfAlive();
       await Future<void>.delayed(const Duration(milliseconds: 900));
-      if (mood == CompanionMood.talking) {
+      if (!_disposed && mood == CompanionMood.talking) {
         mood = CompanionMood.happy;
-        notifyListeners();
+        _notifyListenersIfAlive();
       }
     }
   }
@@ -243,21 +280,24 @@ class AppState extends ChangeNotifier {
   }
 
   void openConversation(Conversation conv) {
+    if (_disposed) return;
     messages = List.from(conv.messages);
     mood = CompanionMood.happy;
-    notifyListeners();
+    _notifyListenersIfAlive();
   }
 
   void newConversation() {
+    if (_disposed) return;
     stopSpeaking();
     messages = [];
     chatError = null;
     _failedPrompt = null;
     mood = CompanionMood.happy;
-    notifyListeners();
+    _notifyListenersIfAlive();
   }
 
   Future<void> retryLastMessage() async {
+    if (_disposed) return;
     final prompt = _failedPrompt;
     if (prompt != null && !isBusy) {
       if (messages.isNotEmpty &&
@@ -270,13 +310,15 @@ class AppState extends ChangeNotifier {
   }
 
   void setMood(CompanionMood value) {
+    if (_disposed) return;
     mood = value;
-    notifyListeners();
+    _notifyListenersIfAlive();
   }
 
   void deleteConversation(String id) {
+    if (_disposed) return;
     conversations.removeWhere((item) => item.id == id);
-    notifyListeners();
+    _notifyListenersIfAlive();
     unawaited(_persistConversations());
   }
 
@@ -285,35 +327,23 @@ class AppState extends ChangeNotifier {
   Future<void> _loadPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_legacyConversationStorageKey);
       _restoreConversations(prefs.getString(_conversationStorageKey));
       ttsEnabled = prefs.getBool('tts_enabled') ?? true;
-      final savedUrl = prefs.getString('backend_url');
-      if (savedUrl != null && savedUrl.isNotEmpty) {
-        backendUrl = _isLegacyLocalBackendUrl(savedUrl)
-            ? ApiChatService.defaultBaseUrl
-            : savedUrl;
-        _apiService?.setBaseUrl(backendUrl);
-        if (backendUrl != savedUrl) {
-          await prefs.setString('backend_url', backendUrl);
-        }
-      } else {
-        backendUrl =
-            _apiService?.currentBaseUrl ?? ApiChatService.defaultBaseUrl;
+      final savedCompanion = prefs.getString(_companionPreferenceKey);
+      if (savedCompanion != null &&
+          availableCompanions.contains(savedCompanion)) {
+        companionId = savedCompanion;
       }
-      await checkServerHealth();
+      await prefs.remove('backend_url');
     } catch (error, stackTrace) {
       debugPrint('Could not load Milo preferences: $error\n$stackTrace');
     } finally {
-      isReady = true;
-      notifyListeners();
+      if (!_disposed) {
+        isReady = true;
+        _notifyListenersIfAlive();
+      }
     }
-  }
-
-  bool _isLegacyLocalBackendUrl(String url) {
-    final uri = Uri.tryParse(url);
-    return uri != null &&
-        uri.port == 8000 &&
-        const {'localhost', '127.0.0.1', '10.0.2.2'}.contains(uri.host);
   }
 
   void _restoreConversations(String? serialized) {
@@ -400,22 +430,42 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setTtsEnabled(bool value) async {
+    if (_disposed) return;
     ttsEnabled = value;
     if (!value) {
       await stopSpeaking();
     }
-    notifyListeners();
+    if (_disposed) return;
+    _notifyListenersIfAlive();
     final prefs = await SharedPreferences.getInstance();
+    if (_disposed) return;
     await prefs.setBool('tts_enabled', value);
   }
 
+  Future<void> setCompanion(String value) async {
+    if (_disposed) return;
+    if (!availableCompanions.contains(value)) {
+      throw ArgumentError.value(value, 'value', 'Unknown Milo companion.');
+    }
+    if (companionId == value) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (_disposed) return;
+    await prefs.setString(_companionPreferenceKey, value);
+    if (_disposed) return;
+    companionId = value;
+    _notifyListenersIfAlive();
+  }
+
   Future<void> signOut() async {
+    if (_disposed) return;
     await onSignOut?.call();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_audioPositionSubscription.cancel());
     unawaited(_audioPlayer.dispose());
     unawaited(flutterTts.stop());
     super.dispose();

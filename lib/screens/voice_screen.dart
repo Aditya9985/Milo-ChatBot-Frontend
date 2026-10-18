@@ -4,12 +4,18 @@ import 'package:provider/provider.dart';
 import '../models/app_models.dart';
 import '../services/app_state.dart';
 import '../services/live_voice_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/character_director.dart';
-import '../widgets/milo_character_viewer.dart';
+import '../widgets/shared_companion_viewer.dart';
 import 'settings_screen.dart';
 
 class VoiceScreen extends StatefulWidget {
   const VoiceScreen({super.key});
+
+  static const String characterScale = '1 1 1';
+  static const String characterCameraOrbit = '0deg 78deg 240%';
+  static const String characterCameraTarget = 'auto auto auto';
+  static const String characterFieldOfView = 'auto';
 
   @override
   State<VoiceScreen> createState() => _VoiceScreenState();
@@ -21,7 +27,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
   AppState? _app;
   bool liveActive = false;
   String currentTranscript = '';
-  String speechBubbleText = 'Tap the microphone to talk with Milo.';
+  String speechBubbleText = '';
   bool showBubble = true;
   Timer? _bubbleTimer;
 
@@ -40,9 +46,20 @@ class _VoiceScreenState extends State<VoiceScreen> {
   void _syncSpokenVoice() {
     final app = _app;
     if (app == null) return;
+    _director.setSpeechText(app.speechText);
     _director.setSpeaking(app.isSpeaking);
     if (app.isSpeaking) {
-      _director.setSpokenWord(app.spokenWord);
+      if (app.spokenWord.isNotEmpty) {
+        _director.setSpokenWord(app.spokenWord);
+      } else {
+        _director.setSpeechProgress(app.speechProgress);
+      }
+    } else if (app.mood == CompanionMood.thinking &&
+        _director.clip != 'think') {
+      _director.play('think', userInitiated: false);
+    } else if (app.mood != CompanionMood.thinking &&
+        _director.clip == 'think') {
+      _director.play(liveActive ? 'listen' : 'idle', userInitiated: false);
     }
   }
 
@@ -72,7 +89,10 @@ class _VoiceScreenState extends State<VoiceScreen> {
 
   void _userMove(AppState state, String clip) {
     _director.play(clip, userInitiated: true);
-    final line = _director.lineFor(clip);
+    final line = _director.lineFor(
+      clip,
+      companion: state.companionName,
+    );
     _showSpeech(line);
     state.speak(line);
   }
@@ -92,11 +112,12 @@ class _VoiceScreenState extends State<VoiceScreen> {
   Future<void> toggleLiveMode(AppState state) async {
     if (liveActive) {
       _stopLive(state);
-      _showSpeech('See you later!', duration: const Duration(seconds: 3));
+      _showSpeech('See you later, ${state.companionName}!',
+          duration: const Duration(seconds: 3));
     } else {
       setState(() => liveActive = true);
       _director.setLiveLocked(true);
-      _showSpeech('Listening... Talk to Milo!',
+      _showSpeech('Listening... Talk to ${state.companionName}!',
           duration: const Duration(seconds: 4));
       await _runListeningTurn(state);
     }
@@ -136,8 +157,10 @@ class _VoiceScreenState extends State<VoiceScreen> {
   Future<void> _handleSpokenInput(AppState state, String text) async {
     if (!mounted || !liveActive) return;
 
-    _showSpeech('Milo is thinking...', duration: const Duration(seconds: 10));
+    _showSpeech('${state.companionName} is thinking...',
+        duration: const Duration(seconds: 10));
     state.setMood(CompanionMood.thinking);
+    _director.play('think', userInitiated: false);
 
     await state.sendMessage(text, readAloud: false);
     if (!mounted || !liveActive) return;
@@ -161,6 +184,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
 
   void _showTextInputDialog(AppState state) {
     final textController = TextEditingController();
+    final companionName = state.companionName;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -181,9 +205,9 @@ class _VoiceScreenState extends State<VoiceScreen> {
           children: [
             Row(
               children: [
-                const Text(
-                  'Say something to Milo',
-                  style: TextStyle(
+                Text(
+                  'Say something to $companionName',
+                  style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: Color(0xff131b2e),
@@ -202,9 +226,9 @@ class _VoiceScreenState extends State<VoiceScreen> {
               autofocus: true,
               style: const TextStyle(fontSize: 15),
               decoration: InputDecoration(
-                hintText: 'Ask Milo a question or say hello...',
+                hintText: 'Ask $companionName a question or say hello...',
                 filled: true,
-                fillColor: const Color(0xfff1f5f9),
+                fillColor: AppTheme.surface,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -223,8 +247,8 @@ class _VoiceScreenState extends State<VoiceScreen> {
               height: 48,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff006096),
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppTheme.primaryContainer,
+                  foregroundColor: AppTheme.ink,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -249,73 +273,96 @@ class _VoiceScreenState extends State<VoiceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
+    final companionName = context.watch<AppState>().companionName;
     return Scaffold(
-      backgroundColor: const Color(0xffeaf3fa),
+      backgroundColor: AppTheme.canvas,
       body: Stack(
         children: [
-          const Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xffedf7ff), Color(0xffc8e1f2)],
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            top: topPad + 36,
-            bottom: 118,
-            child: CompanionCharacterViewer(
-              director: _director,
-            ),
-          ),
-          if (showBubble)
-            Positioned(
-              top: topPad + 64,
-              left: 20,
-              right: 20,
-              child: _buildSpeechBubble(),
-            ),
-          Positioned(
-            top: topPad + 8,
-            left: 12,
-            right: 12,
-            child: Consumer<AppState>(
-              builder: (context, state, _) => Row(
-                children: [
-                  _glassIcon(
-                    icon: Icons.arrow_back_rounded,
-                    onTap: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 8),
-                  const Spacer(),
-                  _statusPill(state),
-                  const Spacer(),
-                  _glassIcon(
-                    icon: Icons.keyboard_rounded,
-                    onTap: () => _showTextInputDialog(state),
-                  ),
-                  const SizedBox(width: 8),
-                  _glassIcon(
-                    icon: Icons.info_outline_rounded,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          const Positioned.fill(child: _VoiceGardenBackground()),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxHeight < 620;
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      child: Consumer<AppState>(
+                        builder: (context, state, _) => Row(
+                          children: [
+                            _glassIcon(
+                              icon: Icons.arrow_back_rounded,
+                              onTap: () => Navigator.pop(context),
+                            ),
+                            const SizedBox(width: 8),
+                            const Spacer(),
+                            _statusPill(state),
+                            const Spacer(),
+                            _glassIcon(
+                              icon: Icons.keyboard_rounded,
+                              onTap: () => _showTextInputDialog(state),
+                            ),
+                            const SizedBox(width: 8),
+                            _glassIcon(
+                              icon: Icons.info_outline_rounded,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const SettingsScreen(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 18,
-            child: Consumer<AppState>(
-              builder: (context, state, _) => _actionBar(state),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        compact ? 8 : 14,
+                        20,
+                        compact ? 4 : 10,
+                      ),
+                      child: SizedBox(
+                        height: compact ? 84 : 116,
+                        child: Center(
+                          child: AnimatedOpacity(
+                            opacity: showBubble ? 1 : 0,
+                            duration: const Duration(milliseconds: 180),
+                            child: IgnorePointer(
+                              ignoring: !showBubble,
+                              child: _buildSpeechBubble(
+                                companionName,
+                                maxHeight: compact ? 84 : 116,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ClipRect(
+                        child: Consumer<AppState>(
+                          builder: (context, state, _) =>
+                              SharedCharacterViewerSlot(
+                            director: _director,
+                            characterId: state.companionId ?? 'milo',
+                            cameraOrbit: VoiceScreen.characterCameraOrbit,
+                            cameraTarget: VoiceScreen.characterCameraTarget,
+                            fieldOfView: VoiceScreen.characterFieldOfView,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
+                      child: Consumer<AppState>(
+                        builder: (context, state, _) => _actionBar(state),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -324,11 +371,13 @@ class _VoiceScreenState extends State<VoiceScreen> {
   }
 
   Widget _statusPill(AppState state) {
-    final label = !liveActive
-        ? 'Milo'
-        : (state.mood == CompanionMood.listening
+    final label = state.mood == CompanionMood.thinking
+        ? 'Thinking'
+        : state.mood == CompanionMood.listening
             ? 'Listening'
-            : (state.mood == CompanionMood.thinking ? 'Thinking' : 'Speaking'));
+            : state.mood == CompanionMood.talking
+                ? 'Speaking'
+                : state.companionName;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -347,9 +396,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
             height: 8,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: liveActive
-                  ? const Color(0xff10b981)
-                  : const Color(0xff007abc),
+              color: liveActive ? const Color(0xff16845b) : AppTheme.brightBlue,
             ),
           ),
           const SizedBox(width: 6),
@@ -368,14 +415,28 @@ class _VoiceScreenState extends State<VoiceScreen> {
 
   Widget _actionBar(AppState state) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
+      padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.92),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.97),
+            (AppTheme.isSuzu
+                    ? const Color(0xfffff1f6)
+                    : const Color(0xfffff9e9))
+                .withValues(alpha: 0.97),
+          ],
+        ),
         borderRadius: BorderRadius.circular(28),
         boxShadow: const [
           BoxShadow(
-              color: Color(0x33000000), blurRadius: 18, offset: Offset(0, 6)),
+            color: Color(0x1c375638),
+            blurRadius: 22,
+            offset: Offset(0, 8),
+          ),
         ],
+        border: Border.all(color: Colors.white, width: 1.5),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -383,26 +444,26 @@ class _VoiceScreenState extends State<VoiceScreen> {
           _labeledAction(
             icon: Icons.arrow_upward_rounded,
             label: 'Jump',
-            color: const Color(0xff0f766e),
+            color: AppTheme.blue,
             onTap: () => _userMove(state, 'jump'),
           ),
           _labeledAction(
             icon: Icons.music_note_rounded,
             label: 'Dance',
-            color: const Color(0xffc026d3),
+            color: AppTheme.blue,
             onTap: () => _userMove(state, 'dance'),
           ),
           _bellButton(state),
           _labeledAction(
             icon: Icons.waving_hand_rounded,
             label: 'Wave',
-            color: const Color(0xff0284c7),
+            color: AppTheme.blue,
             onTap: () => _userMove(state, 'wave'),
           ),
           _labeledAction(
             icon: Icons.rotate_right_rounded,
             label: 'Spin',
-            color: const Color(0xffb45309),
+            color: AppTheme.blue,
             onTap: () => _userMove(state, 'spin'),
           ),
         ],
@@ -419,30 +480,49 @@ class _VoiceScreenState extends State<VoiceScreen> {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        width: 58,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: SizedBox(
+          width: 58,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white,
+                      color.withValues(alpha: 0.12),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withValues(alpha: 0.16)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.14),
+                      blurRadius: 9,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Icon(icon, color: color, size: 23),
               ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: color,
+              const SizedBox(height: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -455,31 +535,42 @@ class _VoiceScreenState extends State<VoiceScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 62,
+            height: 62,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: liveActive
-                  ? const Color(0xff006096)
-                  : const Color(0xff007abc),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: liveActive
+                    ? const [Color(0xff398e63), Color(0xff176b49)]
+                    : AppTheme.isSuzu
+                        ? [const Color(0xffed9fbd), const Color(0xffd96694)]
+                        : const [Color(0xffffce58), Color(0xffedaa30)],
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xff007abc).withValues(alpha: 0.4),
-                  blurRadius: liveActive ? 16 : 8,
+                  color: (liveActive
+                          ? const Color(0xff35875d)
+                          : AppTheme.brightBlue)
+                      .withValues(alpha: 0.36),
+                  blurRadius: liveActive ? 18 : 12,
+                  offset: const Offset(0, 5),
                 ),
               ],
+              border: Border.all(color: Colors.white, width: 2),
             ),
             child: const Center(
-              child: Icon(Icons.mic_rounded, color: Colors.white, size: 29),
+              child: Icon(Icons.mic_rounded, color: Colors.white, size: 27),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             liveActive ? 'Stop' : 'Talk',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w800,
-              color: Color(0xff006096),
+              color: AppTheme.blue,
             ),
           ),
         ],
@@ -507,14 +598,18 @@ class _VoiceScreenState extends State<VoiceScreen> {
     );
   }
 
-  Widget _buildSpeechBubble() => Center(
+  Widget _buildSpeechBubble(
+    String companionName, {
+    required double maxHeight,
+  }) =>
+      Center(
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 320),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          constraints: BoxConstraints(maxWidth: 320, maxHeight: maxHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.95),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xff38bdf8), width: 1.6),
+            border: Border.all(color: AppTheme.brightBlue, width: 1.6),
             boxShadow: const [
               BoxShadow(
                   color: Color(0x24000000),
@@ -525,36 +620,203 @@ class _VoiceScreenState extends State<VoiceScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Row(
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.auto_awesome_rounded,
-                      size: 18, color: Color(0xff006096)),
-                  SizedBox(width: 6),
+                      size: 18, color: AppTheme.blue),
+                  const SizedBox(width: 6),
                   Text(
-                    'MILO',
+                    companionName.toUpperCase(),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xff006096),
+                      color: AppTheme.blue,
                       letterSpacing: 0.8,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                speechBubbleText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xff131b2e),
+              const SizedBox(height: 3),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Text(
+                    speechBubbleText.isEmpty
+                        ? 'Tap the microphone to talk with $companionName.'
+                        : speechBubbleText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xff131b2e),
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ),
       );
+}
+
+class _VoiceGardenBackground extends StatelessWidget {
+  const _VoiceGardenBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        const Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xffdff4ff),
+                  Color(0xfff7f7df),
+                  Color(0xffe8f2c9),
+                ],
+                stops: [0, 0.62, 1],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 118,
+          left: -34,
+          child: _gardenCloud(width: 142, opacity: 0.78),
+        ),
+        Positioned(
+          top: 185,
+          right: -18,
+          child: _gardenCloud(width: 110, opacity: 0.64),
+        ),
+        const Positioned.fill(
+          child: CustomPaint(
+            painter: _GardenHillsPainter(),
+          ),
+        ),
+        const Positioned(
+          bottom: 148,
+          left: 14,
+          child: Icon(
+            Icons.local_florist_rounded,
+            size: 26,
+            color: Color(0xfff5b84e),
+          ),
+        ),
+        const Positioned(
+          bottom: 176,
+          right: 16,
+          child: Icon(
+            Icons.local_florist_rounded,
+            size: 20,
+            color: Color(0xfff1a6a0),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _gardenCloud({required double width, required double opacity}) =>
+      Opacity(
+        opacity: opacity,
+        child: SizedBox(
+          width: width,
+          height: width * 0.42,
+          child: Stack(
+            children: [
+              Positioned(
+                left: width * 0.08,
+                right: width * 0.08,
+                bottom: 0,
+                child: Container(
+                  height: width * 0.2,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(width),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: width * 0.2,
+                bottom: width * 0.08,
+                child: _cloudPuff(width * 0.27),
+              ),
+              Positioned(
+                left: width * 0.4,
+                bottom: width * 0.12,
+                child: _cloudPuff(width * 0.36),
+              ),
+              Positioned(
+                right: width * 0.12,
+                bottom: width * 0.07,
+                child: _cloudPuff(width * 0.24),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _cloudPuff(double size) => Container(
+        width: size,
+        height: size,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+      );
+}
+
+class _GardenHillsPainter extends CustomPainter {
+  const _GardenHillsPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backHill = Path()
+      ..moveTo(0, size.height * 0.76)
+      ..quadraticBezierTo(
+        size.width * 0.28,
+        size.height * 0.58,
+        size.width * 0.56,
+        size.height * 0.76,
+      )
+      ..quadraticBezierTo(
+        size.width * 0.79,
+        size.height * 0.9,
+        size.width,
+        size.height * 0.7,
+      )
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(
+      backHill,
+      Paint()..color = const Color(0xffc4e2a1).withValues(alpha: 0.66),
+    );
+
+    final frontHill = Path()
+      ..moveTo(0, size.height * 0.86)
+      ..quadraticBezierTo(
+        size.width * 0.36,
+        size.height * 0.69,
+        size.width * 0.65,
+        size.height * 0.84,
+      )
+      ..quadraticBezierTo(
+        size.width * 0.84,
+        size.height * 0.92,
+        size.width,
+        size.height * 0.8,
+      )
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(frontHill, Paint()..color = const Color(0xff9bcf82));
+  }
+
+  @override
+  bool shouldRepaint(covariant _GardenHillsPainter oldDelegate) => false;
 }

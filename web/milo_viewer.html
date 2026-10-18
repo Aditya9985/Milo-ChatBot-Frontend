@@ -26,14 +26,10 @@
 <body>
   <model-viewer
     id="milo"
-    src="/assets/assets/grab3d-cozy-character.glb"
     alt="Milo companion model"
     autoplay
     animation-name="idle"
     animation-crossfade-duration="320"
-    camera-orbit="0deg 78deg 2.4m"
-    camera-target="0m 0.55m 0m"
-    field-of-view="28deg"
     shadow-intensity="1"
     shadow-softness="0.8"
     exposure="1"
@@ -47,10 +43,25 @@
   </model-viewer>
   <script>
     const mv = document.getElementById('milo');
+    const params = new URLSearchParams(window.location.search);
+    const character = params.get('character');
+    const scale = params.get('scale');
+    const orbit = params.get('orbit') || '0deg 78deg auto';
+    const target = params.get('target') || 'auto auto auto';
+    const fov = params.get('fov') || 'auto';
+    mv.setAttribute('camera-orbit', orbit);
+    mv.setAttribute('camera-target', target);
+    mv.setAttribute('field-of-view', fov);
+    mv.src = character === 'suzu'
+      ? '/assets/assets/grab3d-cozy-character-girl.glb'
+      : '/assets/assets/grab3d-cozy-character.glb';
+    if (scale) mv.setAttribute('scale', scale);
     const looping = ['idle', 'listen', 'talk', 'dance'];
     const face = { mouth:0, mouthT:0, smile:0, smileT:0, blink:0, blinkT:0,
       speaking:false, lastWordAt:0, nextExprAt:0, nextBlinkAt:0 };
     let meshes = [];
+    let mouthMesh = null;
+    let mouthBase = null;
 
     function collect(root) {
       if (!root) return;
@@ -59,6 +70,22 @@
         const obj = stack.pop();
         if (obj && obj.morphTargetInfluences && obj.morphTargetInfluences.length) {
           meshes.push(obj);
+        }
+        if (obj && obj.isMesh && obj.material) {
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          if (materials.some((material) => material && material.name === 'fix_mouth')) {
+            const geometry = obj.geometry;
+            if (geometry && !geometry.boundingBox && geometry.computeBoundingBox) {
+              geometry.computeBoundingBox();
+            }
+            const bounds = geometry && geometry.boundingBox;
+            mouthMesh = obj;
+            mouthBase = {
+              scaleY:obj.scale.y,
+              positionY:obj.position.y,
+              centerY:bounds ? (bounds.min.y + bounds.max.y) / 2 : 0
+            };
+          }
         }
         const kids = (obj && obj.children) || [];
         for (let i = 0; i < kids.length; i++) stack.push(kids[i]);
@@ -82,6 +109,35 @@
         return null;
       };
       return visit(el, 0);
+    }
+    const motion = {
+      root:null, base:null, name:'idle', startedAt:0, procedural:false
+    };
+    function bindMotion() {
+      const scene = findScene(mv);
+      if (!scene) return;
+      const hasMesh = (root) => {
+        const stack = [root];
+        while (stack.length) {
+          const obj = stack.pop();
+          if (obj && obj.isMesh) return true;
+          const kids = (obj && obj.children) || [];
+          for (let i = 0; i < kids.length; i++) stack.push(kids[i]);
+        }
+        return false;
+      };
+      const root = (scene.children || []).find(hasMesh) || scene;
+      motion.root = root;
+      motion.base = {
+        x:root.position.x, y:root.position.y, z:root.position.z,
+        rx:root.rotation.x, ry:root.rotation.y, rz:root.rotation.z
+      };
+    }
+    function resetMotion() {
+      if (!motion.root || !motion.base) return;
+      const {root, base} = motion;
+      root.position.set(base.x, base.y, base.z);
+      root.rotation.set(base.rx, base.ry, base.rz);
     }
     function viseme(word) {
       const w = String(word || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -107,6 +163,13 @@
           else inf[0] = Math.max(face.mouth, face.blink);
         }
       }
+      if (mouthMesh && mouthBase) {
+        const verticalScale = mouthBase.scaleY *
+          (1 + Math.max(0, face.mouth) * 3.4);
+        mouthMesh.scale.y = verticalScale;
+        mouthMesh.position.y = mouthBase.positionY +
+          mouthBase.centerY * (1 - verticalScale / mouthBase.scaleY);
+      }
     }
     function bind() {
       meshes = [];
@@ -115,7 +178,18 @@
     }
     function playClip(name) {
       const clips = mv.availableAnimations || [];
-      const clip = clips.indexOf(name) >= 0 ? name : 'idle';
+      motion.name = name;
+      motion.startedAt = performance.now();
+      if (!motion.root) bindMotion();
+      motion.procedural = clips.indexOf(name) < 0;
+      if (motion.procedural) {
+        resetMotion();
+        mv.animationName = 'idle';
+        mv.play();
+        return;
+      }
+      resetMotion();
+      const clip = name;
       try { mv.animationCrossfadeDuration = 320; } catch (e) {}
       if (mv.animationName === clip) {
         try { mv.currentTime = 0; } catch (e) {}
@@ -144,6 +218,15 @@
       const data = event.data;
       if (typeof data !== 'string') return;
       if (data.startsWith('anim:')) playClip(data.slice(5));
+      if (data.startsWith('camera:')) {
+        const [orbit, target, fov] = data.slice(7).split('|');
+        if (orbit) mv.cameraOrbit = orbit;
+        if (target) mv.cameraTarget = target;
+        if (fov) mv.fieldOfView = fov;
+      }
+      if (data.startsWith('scale:')) {
+        mv.setAttribute('scale', data.slice(6));
+      }
       if (data === 'speak:on') setSpeaking(true);
       if (data === 'speak:off') setSpeaking(false);
       if (data.startsWith('word:')) {
@@ -157,10 +240,41 @@
     });
     mv.addEventListener('load', () => {
       bind();
+      bindMotion();
       parent.postMessage('milo-ready', '*');
+    });
+    mv.addEventListener('error', (event) => {
+      const detail = event && event.detail ? String(event.detail) : 'GLB load failed';
+      parent.postMessage(`milo-error:${detail}`, '*');
     });
     (function loop(now) {
       requestAnimationFrame(loop);
+      const root = motion.root;
+      const base = motion.base;
+      if (root && base && motion.procedural &&
+          ['listen','talk','dance','spin','think'].indexOf(motion.name) >= 0) {
+        const t = (now - motion.startedAt) / 1000;
+        if (motion.name === 'dance') {
+          root.position.y = base.y + Math.abs(Math.sin(t * 5.5)) * 0.065;
+          root.rotation.x = base.rx + Math.sin(t * 5.5) * 0.035;
+          root.rotation.y = base.ry + Math.sin(t * 2) * 0.1;
+          root.rotation.z = base.rz + Math.sin(t * 2.7) * 0.12;
+        } else if (motion.name === 'spin') {
+          const progress = Math.min(1, t / 1.45);
+          root.rotation.y = base.ry + progress * Math.PI * 2;
+          root.position.y = base.y + Math.sin(progress * Math.PI) * 0.04;
+        } else if (motion.name === 'talk') {
+          root.position.y = base.y + Math.sin(t * 7) * 0.012;
+          root.rotation.x = base.rx + Math.sin(t * 3.5) * 0.018;
+        } else if (motion.name === 'think') {
+          root.position.y = base.y + Math.sin(t * 1.4) * 0.006;
+          root.rotation.x = base.rx - 0.055 + Math.sin(t * 1.1) * 0.012;
+          root.rotation.z = base.rz + 0.065;
+        } else {
+          root.position.y = base.y + Math.sin(t * 2.2) * 0.008;
+          root.rotation.x = base.rx + Math.sin(t * 2.2) * 0.035;
+        }
+      }
       if (face.speaking) {
         if (now - face.lastWordAt > 260) face.mouthT = 0.09;
         if (now > face.nextExprAt) {

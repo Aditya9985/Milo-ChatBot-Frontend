@@ -1,3 +1,3 @@
 abstract class ChatService {
-  Future<String> replyTo(String prompt);
+  Future<String> replyTo(String prompt, {String companion = 'milo'});
 }

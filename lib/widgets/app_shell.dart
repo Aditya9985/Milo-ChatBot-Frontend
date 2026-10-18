@@ -45,7 +45,7 @@ class PrimaryButton extends StatelessWidget {
           style: FilledButton.styleFrom(
               backgroundColor: outline ? Colors.white : AppTheme.blue,
               foregroundColor: outline ? AppTheme.blue : Colors.white,
-              side: outline ? const BorderSide(color: AppTheme.paleBlue) : null,
+              side: outline ? BorderSide(color: AppTheme.paleBlue) : null,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18))),
           onPressed: onPressed,

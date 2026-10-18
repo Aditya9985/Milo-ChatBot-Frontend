@@ -11,12 +11,24 @@ class CompanionCharacterViewer extends StatefulWidget {
     super.key,
     required this.director,
     this.onReady,
+    this.onError,
     this.onTap,
+    this.characterId = 'milo',
+    this.cameraOrbit = '0deg 78deg 2.4m',
+    this.cameraTarget = '0m 0.55m 0m',
+    this.fieldOfView = '28deg',
+    this.modelScale = '1 1 1',
   });
 
   final CharacterDirector director;
   final VoidCallback? onReady;
+  final ValueChanged<Object>? onError;
   final VoidCallback? onTap;
+  final String characterId;
+  final String cameraOrbit;
+  final String cameraTarget;
+  final String fieldOfView;
+  final String modelScale;
 
   @override
   State<CompanionCharacterViewer> createState() =>
@@ -42,15 +54,24 @@ class _CompanionCharacterViewerState extends State<CompanionCharacterViewer> {
       if (data == 'milo-ready' && !_ready) {
         _ready = true;
         widget.onReady?.call();
+        _postCamera();
         _postAnimation(widget.director.clip);
         _postSpeaking(widget.director.speaking);
+      } else if (data is String && data.startsWith('milo-error:')) {
+        widget.onError?.call(data.substring('milo-error:'.length));
       }
     }).toJS;
     web.window.addEventListener('message', _messageListener);
 
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
       final iframe = web.HTMLIFrameElement()
-        ..src = Uri.base.resolve('milo_viewer.html').toString()
+        ..src = Uri.base.resolve('milo_viewer.html').replace(queryParameters: {
+          'character': widget.characterId,
+          'scale': widget.modelScale,
+          'orbit': widget.cameraOrbit,
+          'target': widget.cameraTarget,
+          'fov': widget.fieldOfView,
+        }).toString()
         ..allow = 'autoplay'
         ..style.border = 'none'
         ..style.width = '100%'
@@ -65,6 +86,14 @@ class _CompanionCharacterViewerState extends State<CompanionCharacterViewer> {
   @override
   void didUpdateWidget(covariant CompanionCharacterViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.cameraOrbit != widget.cameraOrbit ||
+        oldWidget.cameraTarget != widget.cameraTarget ||
+        oldWidget.fieldOfView != widget.fieldOfView) {
+      _postCamera();
+    }
+    if (oldWidget.modelScale != widget.modelScale) {
+      _postScale();
+    }
     if (oldWidget.director != widget.director) {
       oldWidget.director.removeListener(_onDirector);
       widget.director.addListener(_onDirector);
@@ -89,6 +118,19 @@ class _CompanionCharacterViewerState extends State<CompanionCharacterViewer> {
 
   void _postAnimation(String name) {
     _iframe?.contentWindow?.postMessage('anim:$name'.toJS, '*'.toJS);
+  }
+
+  void _postCamera() {
+    _iframe?.contentWindow?.postMessage(
+      'camera:${widget.cameraOrbit}|${widget.cameraTarget}|${widget.fieldOfView}'
+          .toJS,
+      '*'.toJS,
+    );
+  }
+
+  void _postScale() {
+    _iframe?.contentWindow
+        ?.postMessage('scale:${widget.modelScale}'.toJS, '*'.toJS);
   }
 
   void _postSpeaking(bool on) {

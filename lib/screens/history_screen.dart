@@ -31,7 +31,7 @@ class HistoryScreen extends StatelessWidget {
                 _header(context, state),
                 Expanded(
                   child: state.conversations.isEmpty
-                      ? _emptyState()
+                      ? _emptyState(state.companionName)
                       : ListView.separated(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
@@ -91,8 +91,8 @@ class HistoryScreen extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const ChatScreen()),
                 );
               },
-              icon: const Icon(Icons.add, size: 18, color: AppTheme.blue),
-              label: const Text(
+              icon: Icon(Icons.add, size: 18, color: AppTheme.blue),
+              label: Text(
                 'New',
                 style: TextStyle(
                   color: AppTheme.blue,
@@ -138,11 +138,11 @@ class HistoryScreen extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: AppTheme.paleBlue,
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.chat_bubble_outline_rounded,
                   color: AppTheme.blue,
                   size: 20,
@@ -189,7 +189,7 @@ class HistoryScreen extends StatelessWidget {
                         const SizedBox(width: 12),
                         Text(
                           '${conv.messages.length} messages',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
                             color: AppTheme.blue,
                             fontWeight: FontWeight.w600,
@@ -210,13 +210,13 @@ class HistoryScreen extends StatelessWidget {
         ),
       );
 
-  Widget _emptyState() => const Center(
+  Widget _emptyState(String companionName) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.forum_rounded, size: 56, color: AppTheme.blue),
-            SizedBox(height: 16),
-            Text(
+            const SizedBox(height: 16),
+            const Text(
               'No conversations yet!',
               style: TextStyle(
                 fontSize: 17,
@@ -224,10 +224,10 @@ class HistoryScreen extends StatelessWidget {
                 color: AppTheme.ink,
               ),
             ),
-            SizedBox(height: 6),
+            const SizedBox(height: 6),
             Text(
-              'Start a conversation with Milo to see it here.',
-              style: TextStyle(color: AppTheme.muted, fontSize: 13),
+              'Start a conversation with $companionName to see it here.',
+              style: const TextStyle(color: AppTheme.muted, fontSize: 13),
             ),
           ],
         ),
